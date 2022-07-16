@@ -1,0 +1,292 @@
+<%
+    var SecurityHeaders = require('SecurityHeaders');
+    SecurityHeaders.addSecurityHeaders(response);
+
+    var SiteSettings
+	,	parameters
+	,	siteType
+	,	Environment
+	,	Utils
+	,	Language
+	,	Currency
+	,	Error
+	,	login
+	,	order
+	,	session
+	,	Application
+	,	environmentParameters
+	,	password_reset_expired
+	,	Configuration
+	,	googletagmanager_cookie
+	,	hasTranslations
+	,	isCoreLanguage;
+
+	try
+	{
+		Application = require('Application');
+		Environment = Application.getEnvironment(request);
+		Utils = require('Utils');
+		session = require('SC.Models.Init').session;
+
+	    if(Environment.standalone && session.isLoggedIn2() && !Environment.reorderEnabled) {
+            nlapiSetRedirectURL('EXTERNAL', session.getSiteSettings(['touchpoints']).touchpoints.customercenter);
+            return;
+	    }
+
+		Configuration = require('Configuration');
+		SiteSettings = require('SiteSettings.Model').get();
+		siteType = SiteSettings.sitetype;
+		parameters = request.getAllParameters();
+		environmentParameters = [];
+		order = session.getOrder();
+
+		Language = Environment.currentLanguage && Environment.currentLanguage.locale || '';
+		Currency = Environment.currencyCodeSpecifiedOnUrl;
+
+		googletagmanager_cookie = encodeURIComponent(request.getParameter('_ga') || '');
+		hasTranslations = app_includes.checkout.translations && app_includes.checkout.translations[Language];
+		isCoreLanguage = !app_includes.checkout.core || (app_includes.checkout.core.translations && app_includes.checkout.core.translations.indexOf(Language) >= 0);
+
+		login = false;
+
+		parameters.fragment = '';
+
+		// Temporal fix, because if a Guest try to go to MyAccount, with Registration mode set to 'disable', it will show a page with nothing to do, so we redirect the Guest to the Cart
+		if (SiteSettings.registration.registrationmandatory === 'T' && parameters.is !== 'checkout')
+		{
+			return nlapiSetRedirectURL('EXTERNAL', SiteSettings.touchpoints.viewcart, null, false, {});
+		}
+
+		if (parameters.passwdret)
+		{
+			try
+			{
+                if (session.isChangePasswordRequest())
+                {
+                    parameters.fragment = 'reset-password';
+                    login = true;
+                }
+                else
+                {
+                    password_reset_expired = true;
+                }
+			}
+			catch (e)
+			{
+				password_reset_expired = true;
+			}
+
+		}
+		else if (parameters.is === 'storelocator')
+		{
+			delete parameters.sitepath;
+			parameters.fragment = 'stores';
+		}
+		else if (
+					(SiteSettings.registration.registrationoptional !== 'T' && !session.isLoggedIn2())
+				||	(!Configuration.get().checkoutApp.skipLogin && !session.isLoggedIn2())
+				||	(parameters.is && (parameters.is === 'login' || parameters.is === 'register') && !session.isLoggedIn2())
+				||	(parameters.is && (parameters.is === 'login' || parameters.is === 'register') && session.getCustomer().isGuest())
+				||	(Configuration.get().checkoutApp.skipLogin && !session.isLoggedIn2() && session.isRecognized())
+				)
+		{
+			delete parameters.sitepath;
+			parameters.fragment = 'login-register';
+			login = true;
+		}
+
+		environmentParameters.push('lang=' + Language );
+		environmentParameters.push('cur=' + Currency );
+		environmentParameters.push('X-SC-Touchpoint=checkout');
+
+		if (!login)
+		{
+			// we don't want to bootstrap the cart in login/register page
+			environmentParameters.push('cart-bootstrap=T');
+		}
+
+		if (request.getParameter('paypalexpress') === 'T')
+		{
+			require('LiveOrder.Model').redirectToPayPalExpress();
+
+			return;
+		}
+		else if (request.getParameter('paypal') === 'T')
+		{
+			require('LiveOrder.Model').redirectToPayPal();
+
+			return;
+		}
+		else if (request.getParameter('paypal') === 'DONE')
+		{
+			require('LiveOrder.Model').backFromPayPal();
+		}
+
+		_.each(require('ExternalPayment.Model').getParametersFromRequest(request), function(value, key) {
+			environmentParameters.push(key.concat('=', value));
+		});
+
+	}
+	catch (e)
+	{
+		Error = Application.processError(e);
+	}
+%>
+
+<!DOCTYPE html>
+<html <%= Language ? 'lang="' + Language.replace('_', '-') + '"' : '' %>>
+	<head>
+		<script>
+			window.applicationStartTime = Date.now();
+		</script>
+		<link rel="shortcut icon" href="<%= session.getAbsoluteUrl2(Application.getFaviconPath() + "img/favicon.ico") %>" />
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+		<title></title>
+		<script src="https://6761736.app.netsuite.com/core/media/media.nl?id=216884&c=6761736&h=x4ZI9GsSH-H3O7IwkUjXiF7eQ6xcsn1s3O5VC3WZnsji_NLG&mv=l5jhprug&_xt=.js&fcts=20220713035931&whence="></script>
+		<% if (siteType === 'STANDARD') { %>
+			<%= getPageFullHead() %>
+		<% } %>
+
+
+			<%
+			   var css_files = app_includes.checkout.css;
+			   for(var i=0; i < css_files.length; i++)
+			   {
+			%>
+					<link rel="stylesheet" href="<%= session.getAbsoluteUrl2(css_files[i]) %>?t=1646679749216">
+			<%
+			   }
+			%>
+
+		<script>
+
+			var googletagmanager_cookie = '';
+
+			<%
+		    if(!googletagmanager_cookie)
+		    {
+		    %>
+
+				var value = "; " + document.cookie;
+				var parts = value.split("; _gid=");
+				if (parts.length === 2)
+				{
+					googletagmanager_cookie = '&_ga='+parts.pop().split(";").shift();
+				}
+
+			<%
+			} else {
+
+			%>
+				googletagmanager_cookie = '&_ga=<%= googletagmanager_cookie %>';
+
+			<%
+			}
+			%>
+
+			var translationUrl = '<%= hasTranslations ? session.getAbsoluteUrl2(app_includes.checkout.translations[Language]) : '' %>';
+			var coreLanguageUrl = '<%= isCoreLanguage ? session.getAbsoluteUrl2("languages") : '' %>';
+
+function Deferred(){this.status="started",this.data=void 0,this.doneCb=[]}function loadJSON(e,o){window.loadedResourcesPromises=window.loadedResourcesPromises||{};var n=new Deferred;window.loadedResourcesPromises[o]=n;var r=new XMLHttpRequest;return r.open("GET",e),r.onreadystatechange=function(){4===r.readyState&&200===r.status&&n.resolve(JSON.parse(r.responseText))},r.send(null),n}function loadScript(e){window.loadedResourcesPromises=window.loadedResourcesPromises||{};var o=window.loadedResourcesPromises[e]=new Deferred,n=document.createElement("script");function r(){o.resolve()}return n.src=e,n.onerror=r,n.onload=r,document.head.appendChild(n),o}function isObject(e){return e&&"object"==typeof e&&!Array.isArray(e)}function merge(e,o){if(isObject(e)&&isObject(o))for(var n,r=Object.keys(o),s=0;s<r.length;s++)!isObject(o[n=r[s]])||void 0===e[n]?e[n]=o[n]:merge(e[n],o[n]);return e}function _each(e,o){for(var n=0;n<e.length;n++)o(e[n],n)}Deferred.prototype.done=function(e){"resolved"===this.status?e(this.data):this.doneCb.push(e)},Deferred.prototype.resolve=function(e){this.data=e,this.status="resolved";for(var o=0;o<this.doneCb.length;o++)this.doneCb[o](this.data);return this},Deferred.all=function(e){for(var o=Object.keys(e),n=0,r=new Deferred,s=0;s<o.length;s++)e[o[s]].done(function(){++n===o.length&&r.resolve()});return r};var SC=window.SC={ENVIRONMENT:{jsEnvironment:"undefined"==typeof nsglobal?"browser":"server"},isCrossOrigin:function(){return"<%= Environment.currentHostString %>"!==document.location.hostname},isPageGenerator:function(){return"undefined"!=typeof nsglobal},getSessionInfo:function(e){var o=SC.SESSION||SC.DEFAULT_SESSION||{};return e?o[e]:o},getPublishedObject:function(e){return SC.ENVIRONMENT&&SC.ENVIRONMENT.published&&SC.ENVIRONMENT.published[e]?SC.ENVIRONMENT.published[e]:null}};window.loadedResourcesPromises=window.loadedResourcesPromises||{},translationUrl&&(window.loadedResourcesPromises.extensionLanguagePromise=new Deferred),coreLanguageUrl&&(window.loadedResourcesPromises.languagePromise=new Deferred),loadJSON('<%= session.getAbsoluteUrl2("services/CheckoutEnvironment.Service.ss?" + environmentParameters.join("&") ) %>'+googletagmanager_cookie+"&t=1646679749216","checkoutEnvironment").done(function(e){merge(SC,e),SC.ENVIRONMENT.isTouchEnabled="ontouchstart"in window||window.DocumentTouch&&document instanceof DocumentTouch,document.documentElement.className=SC.ENVIRONMENT.isTouchEnabled?"touch":"no-touch",translationUrl&&loadScript(translationUrl+"?t=1646679749216").done(function(){window.loadedResourcesPromises.extensionLanguagePromise.resolve()}),coreLanguageUrl&&loadScript(coreLanguageUrl+"/checkout_"+SC.ENVIRONMENT.currentLanguage.locale+".js?t=1646679749216").done(function(){window.loadedResourcesPromises.languagePromise.resolve()})}),SC.extensionModules=[],SC.addExtensionModule=function(e){SC.extensionModules.push(e)};		</script>
+	</head>
+	<body>
+		<noscript>
+			<div class="checkout-layout-no-javascript-msg">
+				<strong>Javascript is disabled on your browser.</strong><br>
+				To view this site, you must enable JavaScript or upgrade to a JavaScript-capable browser.
+			</div>
+		</noscript>
+
+		<% if (siteType && siteType === 'STANDARD') { %>
+			<div id='div__header' style="overflow: hidden;" class='noprint' leftmargin='0' topmargin='0' marginwidth='1' >
+				<table border='0' cellspacing='0' cellpadding='0' width='100%'>
+					<%= getPageTop() %>
+				</table>
+			</div>
+		<% } %>
+
+		<div id="main" class="main"></div>
+
+		<script src="<%= session.getAbsoluteUrl2('checkout.environment.shortcache.ssp?X-SC-Touchpoint=checkout') %>&t=1646679749216"></script>
+		<script src="<%= session.getAbsoluteUrl2('customFieldsMetadata.ssp?')%>t=1646679749216"></script>
+
+		<%
+		var Configuration = require('Configuration');
+		if (Configuration.get().cms.useCMS && Configuration.get().cms.adapterVersion !== '2') { %>
+			<script src="/cms/<%= Configuration.get().cms.adapterVersion %>/cms.js"></script>
+		<% } %>
+
+		<script>
+            if(!SC.isPageGenerator()){
+                var NLRUM = NLRUM || {};
+                NLRUM.bSendBeacon = 0;
+                NLRUM.bResourceTimingDataCollection = 1;
+                NLRUM.autorun = false;
+                loadScript('/nlrum/nlRUM.js');
+        	}
+        </script>
+		<% if (Error) { %>
+			<script>SC.ENVIRONMENT.contextError = <%= JSON.stringify(Error) %>;</script>
+		<% } %>
+
+		<% if (parameters.key) { %>
+			<script>SC.ENVIRONMENT.email_verification_error = true;</script>
+		<% } else if (password_reset_expired) { %>
+			<script>SC.ENVIRONMENT.password_reset_expired_error = true;</script>
+		<% } else if (parameters.passwdret && parameters.fragment !== 'reset-password') { %>
+			<script>SC.ENVIRONMENT.password_reset_invalid_error = true;</script>
+		<% } %>
+
+		<script>
+			if (!~window.location.hash.indexOf('login-register') && !~window.location.hash.indexOf('forgot-password') && '<%= parameters.fragment %>')
+			{
+				window.location.hash = '<%= parameters.fragment %>';
+			}
+		</script>
+
+		<%
+		   var js_files = app_includes.checkout.js;
+		   for(var i=0; i < js_files.length; i++)
+		   {
+		%>
+				<script src="<%= session.getAbsoluteUrl2(js_files[i]) %>?t=1646679749216"></script>
+		<%
+		   }
+		%>
+
+		<script>
+
+			var startApplication = function() {
+	require(["Loggers", "Loggers.Configuration.SCA"], function(Loggers, LoggersConfiguration) {
+		Loggers.Loggers.setConfiguration(LoggersConfiguration.configuration);
+	});
+
+	require(["SC.Checkout.Starter"]);
+	
+}
+
+if(!window.loadedResourcesPromises){
+	startApplication();
+} else {
+	Deferred.all(window.loadedResourcesPromises)
+	.done(function(){
+			startApplication();
+	});
+}
+
+
+		</script>
+
+
+
+		<% if (typeof(release_metadata) != 'undefined') { %>
+		<!-- <%= JSON.stringify(release_metadata) %> -->
+		<% } %>
+		<!--Required to make CyberSource fingerprint feature works-->
+		<%= order.getDeviceFingerPrintingHtml() %>
+	</body>
+</html>
+
+<%= (function(){ try{ return require('ReleaseMetadata').asHTMLComment(); } catch(ex){return '';}} )() %>
